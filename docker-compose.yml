@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  telegram-mail-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-mail-bot
+    restart: always
+    volumes:
+      - ./.env:/workdir/.env
+      - ./conf:/workdir/conf
+      - .:/workdir/src
+    tty: true
+    stdin_open: true

@@ -2,7 +2,10 @@ from pyzmail import PyzMessage, decode_text
 
 class Email(object):
     def __init__(self, raw_mail_lines):
-        msg_content = b'\r\n'.join(raw_mail_lines)
+        if isinstance(raw_mail_lines, str):
+            msg_content = raw_mail_lines
+        else:
+            msg_content = b'\r\n'.join(raw_mail_lines)
         msg =  PyzMessage.factory(msg_content)
 
         self.subject = msg.get_subject()

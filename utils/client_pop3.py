@@ -1,23 +1,25 @@
 import logging
 import poplib
+from .client_base import EmailClientBase
 from utils.mail import Email
 
 
 logger = logging.getLogger(__name__)
 
-
-
-class EmailClient(object):
-    def __init__(self, email_account, passwd):
+class EmailClientPOP3(EmailClientBase):
+    def __init__(self, email_account, passwd, pop3_server=None):
         self.email_account = email_account
         self.password = passwd
+        self.pop3_server = pop3_server
+        if not pop3_server:
+            self.pop3_server = 'pop.'+self.email_account.split('@')[-1]
         self.server = self.connect(self)
 
     @staticmethod
     def connect(self):
         # parse the server's hostname from email account
-        pop3_server = 'pop.'+self.email_account.split('@')[-1]
-        server = poplib.POP3_SSL(pop3_server)
+        
+        server = poplib.POP3_SSL(self.pop3_server)
         # display the welcome info received from server,
         # indicating the connection is set up properly
         logger.info(server.getwelcome().decode('utf8'))
@@ -38,25 +40,20 @@ class EmailClient(object):
         resp_status, mail_lines, mail_octets = self.server.retr(index)
         return Email(mail_lines)
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            logger.info('exited normally\n')
-            self.server.quit()
-        else:
-            logger.error('raise an exception! ' + str(exc_type))
-            self.server.close()
-            return False # Propagate
+    def cleanup(self):
+        self.server.quit()
+    
+    def kill(self):
+        self.server.close()
 
 
 
 if __name__ == '__main__':
-    useraccount = "XXXXX"
-    password = "XXXXXX"
+    import sys
+    useraccount = sys.argv[1]
+    password = sys.argv[2]
 
-    client = EmailClient(useraccount, password)
+    client = EmailClientPOP3(useraccount, password)
     num = client.get_mails_count()
     print(num)
     for i in range(1, num):

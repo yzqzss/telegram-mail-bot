@@ -5,11 +5,15 @@ name = "pypi"
 
 [packages]
 pytz = "*"
-python-telegram-bot = "*"
+tzlocal = "<3.0" # fix Python APScheduler fails: 'Only timezones from the pytz library are supported' error
+python-telegram-bot = "<20.0"
 pyzmail36 = "*"
+APScheduler = "*"
+pysondb = "*"
+python-dotenv = "*"
 
 [dev-packages]
 pylint = "*"
 
 [requires]
-python_version = "3.9"
+python_version = "3.11"

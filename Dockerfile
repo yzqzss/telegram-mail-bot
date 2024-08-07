@@ -1,12 +1,25 @@
-from python:3.9
+FROM docker.io/oz123/pipenv:3.10-v2023-6-26 AS builder
 
-RUN pip install --no-cache-dir pytz python-telegram-bot pyzmail36
+# Tell pipenv to create venv in the current directory
+ENV PIPENV_VENV_IN_PROJECT=1
 
-COPY utils /opt/workdir/telegram-mail-bot/utils
-COPY bot.py /opt/workdir/telegram-mail-bot/
+ADD Pipfile.lock Pipfile /workdir/
 
-WORKDIR /opt/workdir/telegram-mail-bot
+WORKDIR /workdir
 
-ENV TELEGRAM_TOKEN=
+RUN /usr/local/bin/pipenv sync
 
-CMD ["/bin/sh", "-c", "/usr/local/bin/python bot.py" ]
+######### Build Stage Finished ##########
+
+FROM docker.io/python:3.11 AS runtime
+
+RUN mkdir -pv /workdir/.venv
+
+COPY --from=builder /workdir/.venv/ /workdir/.venv/
+
+WORKDIR /workdir/
+VOLUME /workdir/conf
+
+ADD . /workdir/src
+
+CMD ["./.venv/bin/python", "src/bot.py"]
