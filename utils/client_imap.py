@@ -1,5 +1,6 @@
 import logging
 import imaplib
+from urllib.parse import ParseResult, urlparse
 
 from .client_base import EmailClientBase
 from .mail import Email
@@ -7,18 +8,20 @@ from .mail import Email
 logger = logging.getLogger(__name__)
 
 class EmailClientIMAP(EmailClientBase):
-    def __init__(self, email_account, passwd, server_addr=None):
+    def __init__(self, email_account, passwd, server_uri=None):
         self.email_account = email_account
         self.password = passwd
-        self.server_addr = server_addr
-        if not server_addr:
-            self.server_addr = 'imap.'+self.email_account.split('@')[-1]
-        self.server = self.connect(self)
+        if not server_uri:
+            server_uri = 'imaps://imap.'+self.email_account.split('@')[-1]
+        self.server_uri: ParseResult = urlparse(server_uri) # type: ignore
+        self.server = self.connect()
 
-    @staticmethod
     def connect(self):
-        # parse the server's hostname from email account
-        server = imaplib.IMAP4_SSL(self.server_addr)
+        if self.server_uri.scheme == 'imaps':
+            server = imaplib.IMAP4_SSL(self.server_uri.hostname, self.server_uri.port or imaplib.IMAP4_SSL_PORT)
+        else:
+            raise RuntimeError(f'Unsupported IMAP protocol variant: {self.server_uri.scheme}')
+        
         # display the welcome info received from server,
         # indicating the connection is set up properly
         logger.info('imap server welcome: %s', server.welcome.decode('utf8'))
@@ -39,15 +42,15 @@ class EmailClientIMAP(EmailClientBase):
         assert status == 'OK', f'imap failed to fetch: {status}'
         mail_lines = data[0][1].decode()
         return Email(mail_lines)
+
+    def refresh_connection(self):
+        self.server.noop()
     
     def cleanup(self):
         self.server.logout()
     
     def kill(self):
         self.server.close()
-    
-    
-
 
 if __name__ == '__main__':
     import sys

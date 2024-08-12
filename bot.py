@@ -6,12 +6,12 @@ import sys
 import time
 from typing import Type
 import dataclasses
+import typing
 from telegram import Bot, Update
 from telegram.constants import MAX_MESSAGE_LENGTH
 from telegram.ext import (Updater, CommandHandler, CallbackContext)
 from pysondb import db as pysondb # type: ignore
-from utils import EmailClientIMAP, EmailClientPOP3
-from dotenv import dotenv_values
+from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
 
 updater: Updater = None # type: ignore[assignment]
 
@@ -25,7 +25,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(lineno)d - 
 logger = logging.getLogger(__name__)
 
 
-getconf = lambda x: os.environ.get(x) or dotenv_values().get(x)
+getconf = lambda x: os.environ.get(x) # or dotenv_values().get(x)
 bot_token = getconf('TELEGRAM_TOKEN')
 if not bot_token:
     raise Exception('TELEGRAM_TOKEN not set in env or .env file')
@@ -83,8 +83,7 @@ def _help(update: Update, context: CallbackContext) -> None:
 class EmailConf():
     email_addr: str
     email_passwd: str
-    protocol: str
-    server: str
+    server_uri: str
     chat_id: int
     inbox_num: int
 
@@ -94,7 +93,7 @@ def setting_list_email(update: Update, context: CallbackContext) -> None:
     
     msg = 'Email Account List:\n'
     for email in emailDB.getAll():
-        msg += f"    Email: {email['email_addr']}, Password: {email['email_passwd']}, Protocol: {email['protocol']}, Server: {email['server']}, InboxNum: {email['inbox_num']}\n"
+        msg += f"    Email: {email['email_addr']}, Password: {email['email_passwd']}, Server: {email['server']}, InboxNum: {email['inbox_num']}\n"
     update.message.reply_text(msg)
 
 def setting_add_email(update: Update, context: CallbackContext) -> None:
@@ -105,18 +104,16 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
         return
     email_addr = context.args[0]
     email_passwd = context.args[1]
-    email_protocol = context.args[2]
-    email_server = context.args[3]
+    email_server = context.args[2]
     
-    if email_protocol not in ('IMAP', 'POP3'):
-        update.message.reply_text(f"invalid protocol: {email_protocol}")
+    if not email_server.startswith('imap') and not email_server.startswith('pop3'):
+        update.message.reply_text(f"invalid server: {email_server}")
         return
     
     emailConf = EmailConf(
         email_addr=email_addr,
         email_passwd=email_passwd,
-        protocol=email_protocol,
-        server=email_server,
+        server_uri=email_server,
         chat_id=update.message.chat_id,
         inbox_num=-1,
     )
@@ -173,27 +170,28 @@ def getEmailConf(email_addr):
     emailConf = EmailConf(*emailConfs[0])
     return emailConf
 
-emailClientCache: dict[tuple, EmailClientIMAP | EmailClientPOP3] = {}
-def getEmailClient(emailConf: EmailConf) -> EmailClientIMAP | EmailClientPOP3:
+emailClientCache: dict[tuple, EmailClientBase] = {}
+def getEmailClient(emailConf: EmailConf) -> EmailClientBase:
     cacheKey = tuple(dataclasses.astuple(emailConf))
-    emailClient: EmailClientIMAP | EmailClientPOP3 | None = emailClientCache.get(cacheKey, None)
+    emailClient: EmailClientBase | None = emailClientCache.get(cacheKey, None)
     if emailClient:
         try:
-            emailClient.server.noop()
+            emailClient.refresh_connection()
             logger.info(f'email client for {emailConf.email_addr} is still good')
             return emailClient
         except Exception:
             logger.info(f'email client for {emailConf.email_addr} is invalid, re-creating...')
             emailClient = None
-    EmailClient: Type[EmailClientPOP3] | Type[EmailClientIMAP]
-    if emailConf.protocol == 'POP3':
+
+    EmailClient: Type[EmailClientBase]
+    if emailConf.server_uri.startswith('pop3'):
         EmailClient = EmailClientPOP3
-    elif emailConf.protocol == 'IMAP':
+    elif emailConf.server_uri.startswith('imap'):
         EmailClient = EmailClientIMAP
     else:
-        raise Exception(f"invalid email protocol: {emailConf.protocol}")
+        raise Exception(f"invalid email server_uri: {emailConf.server_uri}")
     
-    emailClient = EmailClient(emailConf.email_addr, emailConf.email_passwd, emailConf.server)
+    emailClient = EmailClient(emailConf.email_addr, emailConf.email_passwd, emailConf.server_uri)
     emailClientCache[cacheKey] = emailClient
     return emailClient
 
@@ -201,8 +199,7 @@ def periodic_task() -> None:
     # {
     #     'email_addr': email_addr,
     #     'email_passwd': email_passwd,
-    #     'protocol': email_protocol,
-    #     'server': email_server,
+    #     'server_uri': email_server,
     #     'chat_id': update.message.chat_id,
     # }
     
