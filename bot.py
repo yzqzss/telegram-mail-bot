@@ -263,12 +263,15 @@ def periodic_task() -> None:
                                 )
                         emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
         except Exception as e:
-            if email_addr not in PERIODIC_TASK_ERRORS:
-                PERIODIC_TASK_ERRORS[email_addr] = {}
-            exceptionStr = str(e)
-            if exceptionStr not in PERIODIC_TASK_ERRORS[email_addr]:
-                PERIODIC_TASK_ERRORS[email_addr][exceptionStr] = []
-            PERIODIC_TASK_ERRORS[email_addr][exceptionStr].append(format_exc())
+            if re.findall(r'\bEOF\b', str(e)):
+                pass # do not process occasional random network issue
+            else:
+                if email_addr not in PERIODIC_TASK_ERRORS:
+                    PERIODIC_TASK_ERRORS[email_addr] = {}
+                exceptionStr = str(e)
+                if exceptionStr not in PERIODIC_TASK_ERRORS[email_addr]:
+                    PERIODIC_TASK_ERRORS[email_addr][exceptionStr] = []
+                PERIODIC_TASK_ERRORS[email_addr][exceptionStr].append(format_exc())
             logger.warning('periodic task error in %s', email_addr, exc_info=True)
     
     # for emailConfDict in emailDB.getAll():
