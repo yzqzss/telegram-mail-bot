@@ -76,7 +76,10 @@ def _help(update: Update, context: CallbackContext) -> None:
 /add_email john.doe@example.com password protocol://server[:port] (例：imaps://imap.google.com，pop3s://outlook.office365.com)
 /list_email
 /del_email john.doe@example.com
-/help get help"""
+/help get help
+
+Telegram中回复即可直接回复邮件
+"""
     context.bot.send_message(update.message.chat_id, 
                     # parse_mode=ParseMode.MARKDOWN,
                     text=help_str)

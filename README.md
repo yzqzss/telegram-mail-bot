@@ -8,7 +8,13 @@ A Telegram bot that retrives the newest email periodically and sends them to you
 
 ## Usage
 
-### Docker-Compose (recommended)
+### 1. Configure .env
+
+Copy .env.template to .env, and modify it on your own
+
+### 2. Start the server
+
+#### Docker-Compose (recommended)
 
 ```
 docker-compose up -d
@@ -16,10 +22,10 @@ docker-compose up -d
 
 - Note: use below command when updating
 ```
-docker-compose up -d
+docker-compose up -d --build
 ```
 
-### Run Directly
+#### Run Directly
 
 ```
 ./run.sh
