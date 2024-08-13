@@ -3,7 +3,7 @@ import os
 import poplib
 import time
 from urllib.parse import urlparse, ParseResult
-import socks
+import socks # type: ignore
 from .client_base import EmailClientBase, testMain
 from utils.mail import Email
 
@@ -30,7 +30,7 @@ def _create_socket_proxy(self, timeout):
             proxy_password=pop3Proxy.password,
         )
     else:
-        s = socks.create_connection((self.host, self.port), timeout)
+        s = socket.create_connection((self.host, self.port), timeout)
     return s
         
 poplib.POP3._create_socket = _create_socket_proxy # type: ignore
@@ -51,13 +51,14 @@ class EmailClientPOP3(EmailClientBase):
         if self.server_uri.scheme == 'pop3s':
             server = poplib.POP3_SSL(self.server_uri.hostname, self.server_uri.port or poplib.POP3_SSL_PORT)
         else:
+            # TODO: implement pop3 starttls
             raise RuntimeError(f'Unsupported POP3 protocol variant: {self.server_uri.scheme}')
-        
+
         # server.set_debuglevel(100)
         
         # display the welcome info received from server,
         # indicating the connection is set up properly
-        logger.info(server.getwelcome().decode('utf8'))
+        logger.info('pop3 server welcome: %s', server.getwelcome().decode('utf8'))
         # authenticating
         server.user(self.email_account)
         server.pass_(self.password)

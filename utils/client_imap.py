@@ -20,6 +20,7 @@ class EmailClientIMAP(EmailClientBase):
         if self.server_uri.scheme == 'imaps':
             server = imaplib.IMAP4_SSL(self.server_uri.hostname, self.server_uri.port or imaplib.IMAP4_SSL_PORT)
         else:
+            # TODO: implement imap starttls
             raise RuntimeError(f'Unsupported IMAP protocol variant: {self.server_uri.scheme}')
         
         # display the welcome info received from server,

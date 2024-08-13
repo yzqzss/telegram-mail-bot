@@ -71,14 +71,10 @@ def _help(update: Update, context: CallbackContext) -> None:
         return
     """Send a message when the command /help is issued."""
     help_str = """邮箱设置:
-/add_email john.doe@example.com password
-/inbox
-/get mail_index
+/add_email john.doe@example.com password protocol://server[:port] (例：imaps://imap.google.com，pop3s://outlook.office365.com)
+/list_email
+/del_email john.doe@example.com
 /help get help"""
-    # help_str = "*Mailbox Setting*:\n" \
-    #            "/setting john.doe@example.com password\n" \
-    #            "/inbox\n" \
-    #            "/get mail_index"
     context.bot.send_message(update.message.chat_id, 
                     # parse_mode=ParseMode.MARKDOWN,
                     text=help_str)
@@ -134,9 +130,6 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
         emailDB.add(dataclasses.asdict(emailConf))
     
     update.message.reply_text("Configure email success!")
-    # context.job_queue.run_repeating(periodic_task, interval=60, context=update.message.chat_id)
-    # context.chat_data['job'] = job
-    # logger.info("periodic task scheduled.")
 
 
 def setting_del_email(update: Update, context: CallbackContext) -> None:
@@ -279,39 +272,6 @@ def periodic_task_error_report():
     )
     LAST_ERROR_REPORT_TIME = time.time()
 
-# def inbox(update: Update, context: CallbackContext) -> None:
-#     if not is_owner(update):
-#         return
-#     logger.info("received inbox command.")
-#     if not context.args:
-#         update.message.reply_text("need to supply email_addr")
-#         return
-#     email_addr = context.args[0]
-#     emailConf = getEmailConf(email_addr)
-#     with getEmailClient(emailConf) as client:
-#         new_num = client.get_mails_count()
-#         reply_text = "The index of newest mail is *%d*," \
-#                     " received *%d* new mails since last" \
-#                     " time you checked." % \
-#                     (new_num, new_num - )
-#         inbox_num = new_num
-#         update.message.reply_text("need to supply email_addr")
-
-# def get_email(update: Update, context: CallbackContext) -> None:
-#     if not is_owner(update):
-#         return
-#     if not context.args:
-#         update.message.reply_text('no email id supplied')
-#         return
-#     index = context.args[0]
-#     logger.info("received get command.")
-#     with EmailClient(email_addr, email_passwd) as client:
-#         mail = client.get_mail_by_index(index)
-#         content = mail.__repr__()
-#         for text in handle_large_text(content):
-#             context.bot.send_message(update.message.chat_id,
-#                              text=text)
-
 def main():
     # Create the EventHandler and pass it your bot's token.
     global updater
@@ -345,11 +305,6 @@ def main():
     scheduler.add_job(periodic_task, 'interval', seconds=poll_interval, id='email-periodic_task', replace_existing=True)
     scheduler.add_job(periodic_task_error_report, 'interval', seconds=err_report_interval, id='email-periodic_error_report', replace_existing=True)
     scheduler.start()
-
-    # dp.add_handler(CommandHandler("inbox", inbox))
-
-    # dp.add_handler(CommandHandler("get", get_email))
-
 
     dp.add_error_handler(error)
 
