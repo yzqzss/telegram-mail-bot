@@ -8,7 +8,7 @@ from traceback import format_exc
 from typing import Type
 import dataclasses
 import typing
-from telegram import Bot, Update
+from telegram import Bot, ParseMode, Update
 from telegram.constants import MAX_MESSAGE_LENGTH
 from telegram.ext import (Updater, CommandHandler, MessageHandler, ConversationHandler, Filters, CallbackContext)
 from pysondb import db as pysondb # type: ignore
@@ -248,7 +248,7 @@ def periodic_task() -> None:
                         
                         safeSendText(
                             lambda text: updater.bot.send_message(chat_id=emailConf.chat_id, text=text), # type: ignore[has-type]
-                            text
+                            text,
                         )
                         for filename, filemime, file_content in emailfiles:
                             if filemime.startswith('image'):

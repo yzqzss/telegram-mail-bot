@@ -12,6 +12,7 @@ APScheduler = "*"
 pysondb = "*"
 python-dotenv = "*"
 pysocks = "*"
+markdownify = "*"
 
 [dev-packages]
 pylint = "*"

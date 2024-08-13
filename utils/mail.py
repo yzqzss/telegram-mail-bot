@@ -1,5 +1,8 @@
-from pyzmail import PyzMessage, decode_text
-from pyzmail.parse import MailPart
+from pyzmail import PyzMessage, decode_text # type: ignore
+from pyzmail.parse import MailPart # type: ignore
+
+import logging
+logger = logging.getLogger(__name__)
 
 class Email(object):
     def __init__(self, raw_mail_lines):
@@ -21,7 +24,12 @@ class Email(object):
             mailpart: MailPart
             if mailpart.is_body.startswith('text/html'):
                 payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
-                self.html = payload
+                try:
+                    from markdownify import markdownify as md # type: ignore
+                    self.html = md(payload)
+                except Exception:
+                    logger.warning("cannot use markdownify to convert html, fallback to raw HTML instead.")
+                    self.html = payload
             elif mailpart.is_body.startswith('text/'):
                 payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
                 self.text = payload
