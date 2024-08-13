@@ -10,31 +10,35 @@ class Email(object):
             msg_content = raw_mail_lines
         else:
             msg_content = b'\r\n'.join(raw_mail_lines)
-        msg =  PyzMessage.factory(msg_content)
+        try:
+            msg =  PyzMessage.factory(msg_content)
 
-        self.subject = msg.get_subject()
-        self.sender = msg.get_address('from')
-        self.date = msg.get_decoded_header('date', '')
-        self.id = msg.get_decoded_header('message-id', '')
+            self.subject = msg.get_subject()
+            self.sender = msg.get_address('from')
+            self.date = msg.get_decoded_header('date', '')
+            self.id = msg.get_decoded_header('message-id', '')
 
-        self.text = None
-        self.html = None
-        self.additional_parts = []
-        for mailpart in msg.mailparts:
-            mailpart: MailPart
-            if mailpart.is_body.startswith('text/html'):
-                payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
-                try:
-                    from markdownify import markdownify as md # type: ignore
-                    self.html = md(payload)
-                except Exception:
-                    logger.warning("cannot use markdownify to convert html, fallback to raw HTML instead.")
-                    self.html = payload
-            elif mailpart.is_body.startswith('text/'):
-                payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
-                self.text = payload
-            else:
-                self.additional_parts.append(mailpart)
+            self.text = None
+            self.html = None
+            self.additional_parts = []
+            for mailpart in msg.mailparts:
+                mailpart: MailPart
+                is_body = mailpart.is_body or ''
+                if is_body.startswith('text/html'):
+                    payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
+                    try:
+                        from markdownify import markdownify as md # type: ignore
+                        self.html = md(payload)
+                    except Exception:
+                        logger.warning("cannot use markdownify to convert html, fallback to raw HTML instead.")
+                        self.html = payload
+                elif not is_body or is_body.startswith('text/'):
+                    payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
+                    self.text = payload
+                else:
+                    self.additional_parts.append(mailpart)
+        except Exception as e:
+            raise Exception("Cannot parse email body: %s" % raw_mail_lines) from e
 
     def __repr__(self):
         text, _ = self.format_email()
