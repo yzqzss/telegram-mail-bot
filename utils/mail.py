@@ -1,4 +1,5 @@
 from pyzmail import PyzMessage, decode_text
+from pyzmail.parse import MailPart
 
 class Email(object):
     def __init__(self, raw_mail_lines):
@@ -13,20 +14,41 @@ class Email(object):
         self.date = msg.get_decoded_header('date', '')
         self.id = msg.get_decoded_header('message-id', '')
 
+        self.text = None
+        self.html = None
+        self.additional_parts = []
         for mailpart in msg.mailparts:
-            if mailpart.is_body=='text/plain':
+            mailpart: MailPart
+            if mailpart.is_body.startswith('text/html'):
                 payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
-                self.charset = used_charset
+                self.html = payload
+            elif mailpart.is_body.startswith('text/'):
+                payload, used_charset=decode_text(mailpart.get_payload(), mailpart.charset, None)
                 self.text = payload
-                return
             else:
-                self.text = None
+                self.additional_parts.append(mailpart)
 
     def __repr__(self):
+        text, _ = self.format_email()
+        return text
+
+    def format_email(self):
         mail_str = "Subject: %s\n" % self.subject
         mail_str += "From: %s %s\n" % self.sender
         mail_str += "Date: %s\n" % self.date
         mail_str += "ID: %s\n" % self.id
-        if self.text:
-            mail_str += "Text: %s\n" % self.text
-        return mail_str
+        mail_str += "\n"
+        mainbody = self.text
+        if not self.text or len(self.text) < 20: # not like a real email
+            mainbody = self.html or self.text or ''
+        retfiles = []
+        if self.additional_parts:
+            mainbody += f'\n\nAdditional Parts:\n'
+            for part in self.additional_parts:
+                part: MailPart
+                part_name = part.get_filename()
+                part_content = part.get_payload()
+                mainbody += f'- {part_name} ({part.type}, size {len(part_content)})'
+                retfiles.append((part_name, part.type, part_content))
+        mail_str += mainbody
+        return mail_str, retfiles

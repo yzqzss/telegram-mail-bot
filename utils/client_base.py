@@ -1,6 +1,8 @@
 import logging
 from typing import Type
 
+from .mail import Email
+
 logger = logging.getLogger(__name__)
 
 class EmailClientBase(object):
@@ -11,19 +13,19 @@ class EmailClientBase(object):
     def connect(self):
         raise NotImplementedError()
     
-    def get_mails_count(self):
+    def get_mails_count(self) -> int:
         raise NotImplementedError()
     
-    def get_mail_by_index(self, index):
+    def get_mail_by_index(self, index) -> Email:
         raise NotImplementedError()
     
-    def refresh_connection(self):
+    def refresh_connection(self) -> None:
         raise NotImplementedError()
     
-    def cleanup(self):
+    def cleanup(self) -> None:
         raise NotImplementedError()
     
-    def kill(self):
+    def kill(self) -> None:
         raise NotImplementedError()
     
     def __enter__(self):

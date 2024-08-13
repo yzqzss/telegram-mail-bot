@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import re
 import socket
 import time
 from traceback import format_exc
@@ -9,9 +10,10 @@ import dataclasses
 import typing
 from telegram import Bot, Update
 from telegram.constants import MAX_MESSAGE_LENGTH
-from telegram.ext import (Updater, CommandHandler, CallbackContext)
+from telegram.ext import (Updater, CommandHandler, MessageHandler, ConversationHandler, Filters, CallbackContext)
 from pysondb import db as pysondb # type: ignore
 from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
+from utils.smtpclient import send_email
 
 updater: Updater = None # type: ignore[assignment]
 
@@ -84,6 +86,7 @@ class EmailConf():
     email_addr: str
     email_passwd: str
     server_uri: str
+    smtp_server_uri: str | None
     chat_id: int
     inbox_num: int
 
@@ -105,15 +108,22 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
     email_addr = context.args[0]
     email_passwd = context.args[1]
     email_server = context.args[2]
+    email_smtp = None
+    if len(context.args) > 3:
+        email_smtp = context.args[3]
     
     if not email_server.startswith('imap') and not email_server.startswith('pop3'):
         update.message.reply_text(f"invalid server: {email_server}")
+        return
+    if email_smtp and not email_smtp.startswith('smtp'):
+        update.message.reply_text(f"invalid smtp server: {email_smtp}")
         return
     
     emailConf = EmailConf(
         email_addr=email_addr,
         email_passwd=email_passwd,
         server_uri=email_server,
+        smtp_server_uri=email_smtp,
         chat_id=update.message.chat_id,
         inbox_num=-1,
     )
@@ -151,13 +161,16 @@ def setting_del_email(update: Update, context: CallbackContext) -> None:
 
 def safeSendText(sender, content):
     for text in handle_large_text(content):
-        for i in range(10):
-            try:
-                sender(text)
-                break
-            except Exception:
-                logger.warning('cannot send tg msg (retry %d)', i, exc_info=True)
-            time.sleep(i * 5)
+        safeSend(sender, text)
+
+def safeSend(sender, content):
+    for i in range(10):
+        try:
+            sender(content)
+            break
+        except Exception:
+            logger.warning('cannot send tg msg (retry %d)', i, exc_info=True)
+        time.sleep(i * 5)
 
 def getEmailConf(email_addr):
     emailConfs = emailDB.getByQuery({'email_addr': email_addr})
@@ -227,12 +240,27 @@ def periodic_task() -> None:
                             mail = client.get_mail_by_index(idx)
                         except Exception:
                             logger.warning('cannot retrieve mail %d for %s', idx, emailConf, exc_info=True)
-                            continue
+                            break
+                        
+                        text = f'''New Email [{emailConf.email_addr}-{idx}]\n'''
+                        emailbody, emailfiles = mail.format_email()
+                        text += emailbody
                         
                         safeSendText(
                             lambda text: updater.bot.send_message(chat_id=emailConf.chat_id, text=text), # type: ignore[has-type]
-                            mail.__repr__()
+                            text
                         )
+                        for filename, filemime, file_content in emailfiles:
+                            if filemime.startswith('image'):
+                                safeSend(
+                                    lambda text: updater.bot.send_document(chat_id=emailConf.chat_id, document=text, filename=filename), # type: ignore[has-type]
+                                    text
+                                )
+                            else:
+                                safeSend(
+                                    lambda text: updater.bot.send_photo(chat_id=emailConf.chat_id, photo=file_content, filename=filename), # type: ignore[has-type]
+                                    text
+                                )
                         emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
         except Exception as e:
             if email_addr not in PERIODIC_TASK_ERRORS:
@@ -240,7 +268,7 @@ def periodic_task() -> None:
             exceptionStr = str(e)
             if exceptionStr not in PERIODIC_TASK_ERRORS[email_addr]:
                 PERIODIC_TASK_ERRORS[email_addr][exceptionStr] = []
-            PERIODIC_TASK_ERRORS[email_addr][exceptionStr].append(format_exc(e))
+            PERIODIC_TASK_ERRORS[email_addr][exceptionStr].append(format_exc())
             logger.warning('periodic task error in %s', email_addr, exc_info=True)
     
     # for emailConfDict in emailDB.getAll():
@@ -259,9 +287,10 @@ def periodic_task_error_report():
         logger.info("No errors since last error report, skipping this report!")
         return
     last_errors = PERIODIC_TASK_ERRORS
+    logger.info("last errors: %s", last_errors)
     queries = PERIODIC_TASK_TICK - LAST_ERROR_REPORT_TICK
     PERIODIC_TASK_ERRORS = {}
-    text = f'''Error Summary during last {queries} queries in duration {str(datetime.timedelta(err_report_interval))}:\n'''
+    text = f'''Error Summary during last {queries} queries in duration {str(datetime.timedelta(seconds=err_report_interval))}:\n'''
     for acc, accErrDict in last_errors.items():
         text += f'Acc: {acc}\n'
         for errType, errList in accErrDict.items():
@@ -271,6 +300,24 @@ def periodic_task_error_report():
         text
     )
     LAST_ERROR_REPORT_TIME = time.time()
+
+def handle_reply_send_email(update: Update, context: CallbackContext):
+    original_message = update.message.reply_to_message.text
+    email, mail_id, from_email = re.findall(r'^.*?\[(.*?)-(\d+)\]\n[\S\s]+?From: .*?(\S+)\n', original_message)[0]
+    reply_message = update.message.text
+    subject, split, body = reply_message.partition('\n\n')
+    if split != '\n\n':
+        update.message.reply_text("Don't know the subject of email. Send the email in this form: \n\n(Your subject here)\n\n(Your body)")
+        return
+    emailConf = getEmailConf(email)
+    emailConf.smtp_server_uri
+    send_email(
+        smtp_server_uri=emailConf.smtp_server_uri, 
+        sender_email=emailConf.email_addr, 
+        password=emailConf.email_passwd, 
+        receiver_email=from_email, 
+        subject=subject, body=body)
+    update.message.reply_text(f"Successfully sent the email from {email} to {from_email} with subject {subject}")
 
 def main():
     # Create the EventHandler and pass it your bot's token.
@@ -290,11 +337,24 @@ def main():
     dp.add_handler(CommandHandler("list_email", setting_list_email))
     dp.add_handler(CommandHandler("add_email", setting_add_email))
     dp.add_handler(CommandHandler("del_email", setting_del_email))
+    dp.add_handler(MessageHandler(Filters.reply, handle_reply_send_email))
+    # TODO: implement send mail
+    # dp.add_handler(ConversationHandler(
+    #     entry_points=[CommandHandler("send_email", handle_start_send_email)],
+    #     states={
+    #         SELECT_SENDER: [MessageHandler(Filters.regex('^[^@]+@[^@]+\.[^@]+$'), handle_send_email_semder)],
+    #         INPUT_RECEIVER: [MessageHandler(Filters.regex('^[^@]+@[^@]+\.[^@]+$'), handle_send_email_receiver)],
+    #         BODY: [MessageHandler(Filters.text, handle_send_email_body)],
+    #     },
+    #     fallbacks=[CommandHandler("cancel", cancel)],
+    # ))
+
     
     def errorHandler(update: Update, context: CallbackContext):
         import traceback
         if context.error:
-            update.message.reply_text(f'Error processing command: {traceback.format_exception(context.error)}')
+            excStr = '\n'.join(traceback.format_exception(context.error))
+            update.message.reply_text(f'Error processing command: {excStr}')
         else:
             update.message.reply_text('Error processing command: (unknown error)')
         
