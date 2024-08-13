@@ -11,6 +11,7 @@ pyzmail36 = "*"
 APScheduler = "*"
 pysondb = "*"
 python-dotenv = "*"
+pysocks = "*"
 
 [dev-packages]
 pylint = "*"
