@@ -1,9 +1,9 @@
-import email
+import datetime
 import logging
 import os
 import socket
-import sys
 import time
+from traceback import format_exc
 from typing import Type
 import dataclasses
 import typing
@@ -37,6 +37,10 @@ _poll_interval = getconf('POLL_INTERVAL')
 if not _poll_interval:
     _poll_interval = '60'
 poll_interval = int(_poll_interval)
+_err_report_interval = getconf('ERR_REPORT_INTERVAL')
+if not _err_report_interval:
+    _err_report_interval = '3600'
+err_report_interval = int(_err_report_interval)
 
 def is_owner(update: Update) -> bool:
     return update.message.chat_id == owner_chat_id
@@ -195,6 +199,10 @@ def getEmailClient(emailConf: EmailConf) -> EmailClientBase:
     emailClientCache[cacheKey] = emailClient
     return emailClient
 
+PERIODIC_TASK_ERRORS: dict[str, dict[str, list[str]]] = {
+    
+}
+PERIODIC_TASK_TICK = 0
 def periodic_task() -> None:
     # {
     #     'email_addr': email_addr,
@@ -202,8 +210,10 @@ def periodic_task() -> None:
     #     'server_uri': email_server,
     #     'chat_id': update.message.chat_id,
     # }
+    global PERIODIC_TASK_TICK
+    logger.info("entered periodic task, tick: %d...", PERIODIC_TASK_TICK)
+    PERIODIC_TASK_TICK += 1
     
-    logger.info("entered periodic task...")
     # updater.bot.send_message()
     def handler(emailConfDict):
         logger.info("processing periodic task for %s", emailConfDict)
@@ -231,14 +241,43 @@ def periodic_task() -> None:
                             mail.__repr__()
                         )
                         emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
-        except Exception:
+        except Exception as e:
+            if email_addr not in PERIODIC_TASK_ERRORS:
+                PERIODIC_TASK_ERRORS[email_addr] = {}
+            exceptionStr = str(e)
+            if exceptionStr not in PERIODIC_TASK_ERRORS[email_addr]:
+                PERIODIC_TASK_ERRORS[email_addr][exceptionStr] = []
+            PERIODIC_TASK_ERRORS[email_addr][exceptionStr].append(format_exc(e))
             logger.warning('periodic task error in %s', email_addr, exc_info=True)
     
     # for emailConfDict in emailDB.getAll():
     #     handler(emailConfDict)
+    
+    # TODO: Implement timeout control
     from multiprocessing.pool import ThreadPool
     for _ in ThreadPool(5).imap_unordered(handler, emailDB.getAll()):
         pass
+
+LAST_ERROR_REPORT_TIME: float | None = None
+LAST_ERROR_REPORT_TICK = 0
+def periodic_task_error_report():
+    global PERIODIC_TASK_ERRORS, LAST_ERROR_REPORT_TIME
+    if not PERIODIC_TASK_ERRORS:
+        logger.info("No errors since last error report, skipping this report!")
+        return
+    last_errors = PERIODIC_TASK_ERRORS
+    queries = PERIODIC_TASK_TICK - LAST_ERROR_REPORT_TICK
+    PERIODIC_TASK_ERRORS = {}
+    text = f'''Error Summary during last {queries} queries in duration {str(datetime.timedelta(err_report_interval))}:\n'''
+    for acc, accErrDict in last_errors.items():
+        text += f'Acc: {acc}\n'
+        for errType, errList in accErrDict.items():
+            text += f'    Error: {errType}, triggered {len(errList)} times\n'
+    safeSendText(
+        lambda text: updater.bot.send_message(chat_id=owner_chat_id, text=text), # type: ignore[has-type]
+        text
+    )
+    LAST_ERROR_REPORT_TIME = time.time()
 
 # def inbox(update: Update, context: CallbackContext) -> None:
 #     if not is_owner(update):
@@ -304,6 +343,7 @@ def main():
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler()
     scheduler.add_job(periodic_task, 'interval', seconds=poll_interval, id='email-periodic_task', replace_existing=True)
+    scheduler.add_job(periodic_task, 'interval', seconds=err_report_interval, id='email-periodic_task', replace_existing=True)
     scheduler.start()
 
     # dp.add_handler(CommandHandler("inbox", inbox))
