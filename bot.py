@@ -177,7 +177,10 @@ def getEmailConf(email_addr):
     if not emailConfs:
         raise Exception(f'cannot find config for email {email_addr}')
     assert len(emailConfs) == 1
-    emailConf = EmailConf(*emailConfs[0])
+    emailConfDict = emailConfs[0]
+    if 'id' in emailConfDict:
+        emailConfDict.pop('id')
+    emailConf = EmailConf(**emailConfDict)
     return emailConf
 
 emailClientCache: dict[tuple, EmailClientBase] = {}
