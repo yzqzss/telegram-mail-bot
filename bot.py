@@ -343,7 +343,7 @@ def main():
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler()
     scheduler.add_job(periodic_task, 'interval', seconds=poll_interval, id='email-periodic_task', replace_existing=True)
-    scheduler.add_job(periodic_task, 'interval', seconds=err_report_interval, id='email-periodic_task', replace_existing=True)
+    scheduler.add_job(periodic_task_error_report, 'interval', seconds=err_report_interval, id='email-periodic_error_report', replace_existing=True)
     scheduler.start()
 
     # dp.add_handler(CommandHandler("inbox", inbox))
