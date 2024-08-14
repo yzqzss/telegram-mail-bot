@@ -291,13 +291,14 @@ def periodic_task() -> None:
 LAST_ERROR_REPORT_TIME: float | None = None
 LAST_ERROR_REPORT_TICK = 0
 def periodic_task_error_report():
-    global PERIODIC_TASK_ERRORS, LAST_ERROR_REPORT_TIME
+    global PERIODIC_TASK_ERRORS, LAST_ERROR_REPORT_TIME, LAST_ERROR_REPORT_TICK
     if not PERIODIC_TASK_ERRORS:
         logger.info("No errors since last error report, skipping this report!")
         return
     last_errors = PERIODIC_TASK_ERRORS
     logger.info("last errors: %s", last_errors)
     queries = PERIODIC_TASK_TICK - LAST_ERROR_REPORT_TICK
+    LAST_ERROR_REPORT_TICK = PERIODIC_TASK_TICK
     PERIODIC_TASK_ERRORS = {}
     text = f'''Error Summary during last {queries} queries in duration {str(datetime.timedelta(seconds=err_report_interval))}:\n'''
     for acc, accErrDict in last_errors.items():
