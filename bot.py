@@ -11,7 +11,7 @@ import typing
 from telegram import Bot, ParseMode, Update
 from telegram.constants import MAX_MESSAGE_LENGTH
 from telegram.ext import (Updater, CommandHandler, MessageHandler, ConversationHandler, Filters, CallbackContext)
-from pysondb import db as pysondb # type: ignore
+from pysondb import db as pysondb
 from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
 from utils.smtpclient import send_email
 
@@ -43,6 +43,10 @@ _err_report_interval = getconf('ERR_REPORT_INTERVAL')
 if not _err_report_interval:
     _err_report_interval = '3600'
 err_report_interval = int(_err_report_interval)
+_request_timeout = getconf('REQUEST_TIMEOUT')
+if not _request_timeout:
+    _request_timeout = '60'
+request_timeout = int(_request_timeout)
 
 def is_owner(update: Update) -> bool:
     return update.message.chat_id == owner_chat_id
@@ -195,8 +199,8 @@ def getEmailClient(emailConf: EmailConf) -> EmailClientBase:
             emailClient.refresh_connection()
             logger.info(f'email client for {emailConf.email_addr} is still good')
             return emailClient
-        except Exception:
-            logger.info(f'email client for {emailConf.email_addr} is invalid, re-creating...')
+        except Exception as e:
+            logger.info(f'email client for {emailConf.email_addr} is invalid ({str(e)}), re-creating...')
             emailClient = None
 
     EmailClient: Type[EmailClientBase]
@@ -227,7 +231,7 @@ def periodic_task() -> None:
     PERIODIC_TASK_TICK += 1
     
     # updater.bot.send_message()
-    def handler(emailConfDict):
+    def handler(emailConfDict, managers=None):
         logger.info("processing periodic task for %s", emailConfDict)
         try:
             if 'id' in emailConfDict:
@@ -237,37 +241,61 @@ def periodic_task() -> None:
         except Exception:
             logger.warning('Cannot parse emailConfDict: %s', emailConfDict, exc_info=True)
             return
-        try:            
-            with getEmailClient(emailConf) as client:
-                new_inbox_num = client.get_mails_count()
-                if new_inbox_num > emailConf.inbox_num:
-                    for idx in range(emailConf.inbox_num + 1, new_inbox_num + 1):
-                        try:
-                            mail = client.get_mail_by_index(idx)
-                        except Exception:
-                            logger.warning('cannot retrieve mail %d for %s', idx, emailConf, exc_info=True)
-                            break
-                        
-                        text = f'''New Email [{emailConf.email_addr}-{idx}]\n'''
-                        emailbody, emailfiles = mail.format_email()
-                        text += emailbody
-                        
-                        safeSendText(
-                            lambda text: updater.bot.send_message(chat_id=emailConf.chat_id, text=text), # type: ignore[has-type]
-                            text,
-                        )
-                        for filename, filemime, file_content in emailfiles:
-                            if filemime.startswith('image'):
-                                safeSend(
-                                    lambda text: updater.bot.send_document(chat_id=emailConf.chat_id, document=text, filename=filename), # type: ignore[has-type]
-                                    text
-                                )
-                            else:
-                                safeSend(
-                                    lambda text: updater.bot.send_photo(chat_id=emailConf.chat_id, photo=file_content, filename=filename), # type: ignore[has-type]
-                                    text
-                                )
-                        emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
+        from multiprocessing import get_context, Process, Manager, Queue
+        ctx = get_context('fork')
+        # def run_with_timeout(fun, *args, **kwargs):
+        #     d = Manager().dict()
+        #     def wrapper():
+        #         d['ret'] = fun(*args, **kwargs)
+        #     p: Process = ctx.Process(target=wrapper, args=args, kwargs=kwargs)
+        #     p.start()
+        #     p.join(request_timeout)
+        #     if p.exitcode != 0:
+        #         raise RuntimeError("Error during executing run_with_timeout, code: %s" % p.exitcode)
+        #     p.kill()
+        #     return d['ret']
+        #     # cannot use Pool because it will pickle lots of things causing error
+        #     # try:
+        #     #     pool = ctx.Pool(1)
+        #     #     fut = pool.apply_async(fun, args=args, kwds=kwargs)
+        #     #     return fut.get(request_timeout)
+        #     # finally:
+        #     #     pool.close()
+        def run_with_timeout(fun, *args, **kwargs):
+            pool = ThreadPool(1)
+            fut = pool.apply_async(fun, args=args, kwds=kwargs)
+            return fut.get(request_timeout)
+        try:
+            client = getEmailClient(emailConf)
+            new_inbox_num = run_with_timeout(lambda: client.get_mails_count())
+            if new_inbox_num > emailConf.inbox_num:
+                for idx in range(emailConf.inbox_num + 1, new_inbox_num + 1):
+                    try:
+                        mail = run_with_timeout(lambda: client.get_mail_by_index(idx))
+                    except Exception:
+                        logger.warning('cannot retrieve mail %d for %s', idx, emailConf, exc_info=True)
+                        break
+                    
+                    text = f'''New Email [{emailConf.email_addr}-{idx}]\n'''
+                    emailbody, emailfiles = mail.format_email()
+                    text += emailbody
+                    
+                    run_with_timeout(lambda: safeSendText(
+                        lambda text: updater.bot.send_message(chat_id=emailConf.chat_id, text=text), # type: ignore[has-type]
+                        text,
+                    ))
+                    for filename, filemime, file_content in emailfiles:
+                        if filemime.startswith('image'):
+                            run_with_timeout(lambda: safeSend(
+                                lambda text: updater.bot.send_document(chat_id=emailConf.chat_id, document=text, filename=filename), # type: ignore[has-type]
+                                text
+                            ))
+                        else:
+                            run_with_timeout(lambda: safeSend(
+                                lambda text: updater.bot.send_photo(chat_id=emailConf.chat_id, photo=file_content, filename=filename), # type: ignore[has-type]
+                                text
+                            ))
+                    emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
         except Exception as e:
             if re.findall(r'\bEOF\b', str(e)):
                 pass # do not process occasional random network issue
