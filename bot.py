@@ -271,6 +271,8 @@ def periodic_task() -> None:
         except Exception as e:
             if re.findall(r'\bEOF\b', str(e)):
                 pass # do not process occasional random network issue
+            elif re.findall(r'Server Unavailable. 21', str(e)):
+                pass # ignore stupid outlook server error
             else:
                 if email_addr not in PERIODIC_TASK_ERRORS:
                     PERIODIC_TASK_ERRORS[email_addr] = {}
