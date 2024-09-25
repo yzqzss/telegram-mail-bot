@@ -13,6 +13,7 @@ pysondb = "*"
 python-dotenv = "*"
 pysocks = "*"
 markdownify = "*"
+requests = "*"
 
 [dev-packages]
 pylint = "*"

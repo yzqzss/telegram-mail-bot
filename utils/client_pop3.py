@@ -5,6 +5,7 @@ import time
 from urllib.parse import urlparse, ParseResult
 import socks # type: ignore
 from .client_base import EmailClientBase, testMain
+from .oauth2_helper import OAuth2Factory, Token
 from utils.mail import Email
 
 def _create_socket_proxy(self, timeout):
@@ -60,8 +61,15 @@ class EmailClientPOP3(EmailClientBase):
         # indicating the connection is set up properly
         logger.info('pop3 server welcome: %s', server.getwelcome().decode('utf8'))
         # authenticating
-        server.user(self.email_account)
-        server.pass_(self.password)
+        token: Token = OAuth2Factory.token_from_string(self.password)
+        if token is None:
+            # normal basic auth
+            server.user(self.email_account)
+            server.pass_(self.password)
+        else:
+            saslBody = token.getSasl(self.email_account)
+            server._shortcmd('AUTH XOAUTH2')
+            server._shortcmd(saslBody)
         return server
 
     def get_mails_list(self):

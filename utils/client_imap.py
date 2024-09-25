@@ -3,6 +3,7 @@ import imaplib
 from urllib.parse import ParseResult, urlparse
 
 from .client_base import EmailClientBase
+from .oauth2_helper import OAuth2Factory, Token
 from .mail import Email
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,12 @@ class EmailClientIMAP(EmailClientBase):
         # indicating the connection is set up properly
         logger.info('imap server welcome: %s', server.welcome.decode('utf8'))
         # authenticating
-        status, statusText = server.login(self.email_account, self.password)
+        token = OAuth2Factory.token_from_string(self.password)
+        if token is None:
+            # normal basic auth
+            status, statusText = server.login(self.email_account, self.password)
+        else:
+            server.authenticate("XOAUTH2", lambda *_: token.getSasl(self.email_account))
         assert status == 'OK', f'imap failed to login: {status}'
         logger.info('imap login ok: %s', statusText)
         return server

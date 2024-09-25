@@ -13,6 +13,7 @@ from telegram.constants import MAX_MESSAGE_LENGTH
 from telegram.ext import (Updater, CommandHandler, MessageHandler, ConversationHandler, Filters, CallbackContext)
 from pysondb import db as pysondb
 from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
+from utils.oauth2_helper import OAuth2Factory
 from utils.smtpclient import send_email
 
 updater: Updater = None # type: ignore[assignment]
@@ -79,8 +80,12 @@ def _help(update: Update, context: CallbackContext) -> None:
     help_str = """邮箱设置:
 /add_email john.doe@example.com password protocol://server[:port] smtp_protocol://smtp_server[:port]
 例：
-    /add_email john.doe@hotmail.com password pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+    /add_email john.doe@hotmail.com P@ssw0rd pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+    /add_email john.doe@hotmail.com token:ms:XX_refresh_token_XXX imaps://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+    /add_email john.doe@hotmail.com code:ms:XX_authorization_code_XXX imaps://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
     /add_email john.doe@gmail.com password imaps://imap.gmail.com:993 smtps://smtp.gmail.com
+    
+    use this URL to get auth code: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=9e5f94bc-e8a4-4e73-b8be-63364c29d753&redirect_uri=https%3A%2F%2Flocalhost&scope=https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All+https%3A%2F%2Foutlook.office.com%2FPOP.AccessAsUser.All+https%3A%2F%2Foutlook.office.com%2FSMTP.Send+offline_access
 
 /list_email
 /del_email john.doe@example.com
@@ -145,6 +150,12 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
     )
     
     logger.info("received setting_email command.")
+    
+    new_passwd = OAuth2Factory.code_to_token(email_passwd)
+    if new_passwd:
+        update.message.reply_text(f"Exchanged refresh_token {new_passwd} from {email_passwd} for email {email_addr}, Rewriting password~")
+        email_passwd = new_passwd
+
     with getEmailClient(emailConf) as client:
         inbox_num = client.get_mails_count()
     emailConf.inbox_num = inbox_num

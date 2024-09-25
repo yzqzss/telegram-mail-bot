@@ -4,6 +4,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse
 
+from .oauth2_helper import OAuth2Factory
+
 logger = logging.getLogger(__name__)
 
 def send_email(smtp_server_uri, sender_email, password, receiver_email, subject, body):
@@ -29,8 +31,15 @@ def send_email(smtp_server_uri, sender_email, password, receiver_email, subject,
     else:
         raise NotImplementedError(f"Unsupported protocol: {smtp_server_uri.scheme}")
 
+    # server.set_debuglevel(100)
+
     try:
-        server.login(sender_email, password)  # 登录SMTP服务器
+        token = OAuth2Factory.token_from_string(password)
+        if not token:
+            server.login(sender_email, password)  # 登录SMTP服务器
+        else:
+            server.ehlo_or_helo_if_needed()
+            server.auth('XOAUTH2', lambda: token.getSasl(sender_email))
         text = msg.as_string()  # 转换为字符串
         ret = server.sendmail(sender_email, receiver_email, text)  # 发送邮件
         logger.info("successfully sent email with return info: %s", ret)
