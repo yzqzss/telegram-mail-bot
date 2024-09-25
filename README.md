@@ -8,6 +8,25 @@ A Telegram bot that retrives the newest email periodically and sends them to you
 
 ## Usage
 
+### Setup
+```
+/add_email john.doe@example.com password protocol://server[:port] smtp_protocol://server[:port]
+/list_email
+/del_email john.doe@example.com
+/help get help
+```
+
+Example:
+```
+/add_email john.doe@hotmail.com password pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+/add_email john.doe@gmail.com password imaps://imap.gmail.com:993 smtps://smtp.gmail.com
+```
+
+You can then reply on received email to send reply with SMTP
+
+
+## Deploy
+
 ### 1. Configure .env
 
 Copy .env.template to .env, and modify it on your own

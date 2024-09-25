@@ -77,7 +77,11 @@ def _help(update: Update, context: CallbackContext) -> None:
         return
     """Send a message when the command /help is issued."""
     help_str = """邮箱设置:
-/add_email john.doe@example.com password protocol://server[:port] (例：imaps://imap.google.com，pop3s://outlook.office365.com)
+/add_email john.doe@example.com password protocol://server[:port] smtp_protocol://smtp_server[:port]
+例：
+    /add_email john.doe@hotmail.com password pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+    /add_email john.doe@gmail.com password imaps://imap.gmail.com:993 smtps://smtp.gmail.com
+
 /list_email
 /del_email john.doe@example.com
 /help get help
