@@ -102,8 +102,13 @@ def setting_list_email(update: Update, context: CallbackContext) -> None:
         return
     
     msg = 'Email Account List:\n'
-    for email in emailDB.getAll():
-        msg += f"    Email: {email['email_addr']}, Password: {email['email_passwd']}, Server: {email['server']}, InboxNum: {email['inbox_num']}\n"
+    for emailConfDict in emailDB.getAll():
+        try:
+            emailConf = getEmailConfFromDict(emailConfDict)
+        except Exception:
+            msg += "    (Invalid Email Account: %s)\n" % emailConfDict
+            continue
+        msg += f"    Email: {emailConf.email_addr}, Password: {emailConf.email_passwd}, Server: {emailConf.server_uri}, SMTP Server: {emailConf.smtp_server_uri}, InboxNum: {emailConf.inbox_num}\n"
     update.message.reply_text(msg)
 
 def setting_add_email(update: Update, context: CallbackContext) -> None:
@@ -185,6 +190,12 @@ def getEmailConf(email_addr):
         raise Exception(f'cannot find config for email {email_addr}')
     assert len(emailConfs) == 1
     emailConfDict = emailConfs[0]
+    if 'id' in emailConfDict:
+        emailConfDict.pop('id')
+    emailConf = EmailConf(**emailConfDict)
+    return emailConf
+
+def getEmailConfFromDict(emailConfDict):
     if 'id' in emailConfDict:
         emailConfDict.pop('id')
     emailConf = EmailConf(**emailConfDict)
