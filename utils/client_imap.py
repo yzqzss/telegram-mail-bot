@@ -1,8 +1,9 @@
+from base64 import b64decode
 import logging
 import imaplib
 from urllib.parse import ParseResult, urlparse
 
-from .client_base import EmailClientBase
+from .client_base import EmailClientBase, testMain
 from .oauth2_helper import OAuth2Factory, Token
 from .mail import Email
 
@@ -23,6 +24,8 @@ class EmailClientIMAP(EmailClientBase):
         else:
             # TODO: implement imap starttls
             raise RuntimeError(f'Unsupported IMAP protocol variant: {self.server_uri.scheme}')
+
+        # server.debug = 100
         
         # display the welcome info received from server,
         # indicating the connection is set up properly
@@ -33,7 +36,10 @@ class EmailClientIMAP(EmailClientBase):
             # normal basic auth
             status, statusText = server.login(self.email_account, self.password)
         else:
-            server.authenticate("XOAUTH2", lambda *_: token.getSasl(self.email_account))
+            saslBody = token.getSasl(self.email_account)
+            # status, statusText = server._simple_command('AUTHENTICATE', 'XOAUTH2', saslBody) # this will break imaplib's internal state
+            # IMAP4.authenticate receives raw SASL bytes instead of base64 string, so we decode it first
+            status, statusText = server.authenticate("XOAUTH2", lambda _: b64decode(saslBody))
         assert status == 'OK', f'imap failed to login: {status}'
         logger.info('imap login ok: %s', statusText)
         return server
@@ -60,12 +66,13 @@ class EmailClientIMAP(EmailClientBase):
         self.server.close()
 
 if __name__ == '__main__':
-    import sys
-    useraccount = sys.argv[1]
-    password = sys.argv[2]
+    # import sys
+    # useraccount = sys.argv[1]
+    # password = sys.argv[2]
 
-    client = EmailClientIMAP(useraccount, password)
-    num = client.get_mails_count()
-    print(num)
-    for i in range(1, num):
-        print(client.get_mail_by_index(i))
+    # client = EmailClientIMAP(useraccount, password)
+    # num = client.get_mails_count()
+    # print(num)
+    # for i in range(1, num):
+    #     print(client.get_mail_by_index(i))
+    testMain(EmailClientIMAP)
