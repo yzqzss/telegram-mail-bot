@@ -333,24 +333,35 @@ LAST_ERROR_REPORT_TIME: float | None = None
 LAST_ERROR_REPORT_TICK = 0
 def periodic_task_error_report():
     global PERIODIC_TASK_ERRORS, LAST_ERROR_REPORT_TIME, LAST_ERROR_REPORT_TICK
-    if not PERIODIC_TASK_ERRORS:
+    
+    last_errors = PERIODIC_TASK_ERRORS
+    logger.info("last errors (%s - %s): %s", LAST_ERROR_REPORT_TIME, time.time(), last_errors)
+    
+    queries = PERIODIC_TASK_TICK - LAST_ERROR_REPORT_TICK
+    time_since_last_report = str(datetime.datetime.now() - LAST_ERROR_REPORT_TIME) if not LAST_ERROR_REPORT_TIME else str(datetime.timedelta(seconds=err_report_interval))
+    
+    LAST_ERROR_REPORT_TICK = PERIODIC_TASK_TICK
+    LAST_ERROR_REPORT_TIME = time.time()
+    PERIODIC_TASK_ERRORS = {}
+    
+    if not last_errors:
         logger.info("No errors since last error report, skipping this report!")
         return
-    last_errors = PERIODIC_TASK_ERRORS
-    logger.info("last errors: %s", last_errors)
-    queries = PERIODIC_TASK_TICK - LAST_ERROR_REPORT_TICK
-    LAST_ERROR_REPORT_TICK = PERIODIC_TASK_TICK
-    PERIODIC_TASK_ERRORS = {}
-    text = f'''Error Summary during last {queries} queries in duration {str(datetime.timedelta(seconds=err_report_interval))}:\n'''
+    
+    text = ''
     for acc, accErrDict in last_errors.items():
-        text += f'Acc: {acc}\n'
-        for errType, errList in accErrDict.items():
-            text += f'    Error: {errType}, triggered {len(errList)} times\n'
+        if sum(c for c in accErrDict.values()) < queries * 0.5:
+            # to avoid spamming, we only print error summary if this account has MASSIVE amount of errors
+            text += f'Acc: {acc}\n'
+            for errType, errList in accErrDict.items():
+                text += f'    Error: {errType}, triggered {len(errList)} times\n'
+    if not text:
+        logger.info("No account have massive errors, skipping this report!")
+    text = f'''Error Summary during last {queries} queries in duration {time_since_last_report}:\n''' + text
     safeSendText(
         lambda text: updater.bot.send_message(chat_id=owner_chat_id, text=text), # type: ignore[has-type]
         text
     )
-    LAST_ERROR_REPORT_TIME = time.time()
 
 def handle_reply_send_email(update: Update, context: CallbackContext):
     original_message = update.message.reply_to_message.text
