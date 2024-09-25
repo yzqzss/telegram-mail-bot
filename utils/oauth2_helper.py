@@ -32,7 +32,7 @@ class TokenStore():
     
     @classmethod
     def get(self, refresh_token: str, refresher) -> Token:
-        if refresh_token in self.store:
+        if refresh_token not in self.store:
             self.store[refresh_token] = Token(refresh_token, refresher)
         return self.store[refresh_token]    
 
@@ -65,10 +65,13 @@ class OAuth2_Base():
         #     "token_type": "Bearer"
         # }
         try:
-            ret = response.json()['refresh_token']
+            r = response.json()
+            refresh_token = r['refresh_token']
+            token = r['access_token']
+            expire = time.time() + r['expires_in'] - 10
         except Exception:
             raise RuntimeError('invalid server return body: %s' % response.text)
-        return ret
+        return refresh_token, token, expire
     
     @classmethod
     def access_token_from_refresh_token(self, refresh_token):
@@ -113,7 +116,7 @@ class OAuth2Factory():
         return self.PROVIDERS_DICT[name]
 
     @classmethod
-    def token_from_string(self, s) -> None | Token:
+    def token_from_string(self, s) -> Token | None:
         # s should have format token:{provider}:{refresh_token}
         if not s.startswith('token:'):
             return None
@@ -123,10 +126,10 @@ class OAuth2Factory():
         provider_name, refresh_token = m.groups()
         
         provider = self.get_provider(provider_name)
-        return Token(refresh_token, provider.access_token_from_refresh_token)
+        return TokenStore.get(refresh_token, provider.access_token_from_refresh_token)
     
     @classmethod
-    def code_to_token(self, s) -> str:
+    def code_to_token(self, s) -> str | None:
         if not s.startswith('code:'):
             return None
         # s should have format token:{provider}:{refresh_token}
@@ -136,7 +139,10 @@ class OAuth2Factory():
         provider_name, code = m.groups()
         
         provider = self.get_provider(provider_name)
-        refresh_token = provider.refresh_token_from_code(code)
+        refresh_token, token, token_expire = provider.refresh_token_from_code(code)
+        t = TokenStore.get(refresh_token, provider.access_token_from_refresh_token)
+        t.access_token = token
+        t.access_token_expire = token_expire
         return f'token:{provider_name}:{refresh_token}'
 
 class OAuth2_MS(OAuth2_Base):

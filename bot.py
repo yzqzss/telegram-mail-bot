@@ -151,10 +151,10 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
     
     logger.info("received setting_email command.")
     
-    new_passwd = OAuth2Factory.code_to_token(email_passwd)
+    new_passwd = OAuth2Factory.code_to_token(s=email_passwd)
     if new_passwd:
         update.message.reply_text(f"Exchanged refresh_token {new_passwd} from {email_passwd} for email {email_addr}, Rewriting password~")
-        email_passwd = new_passwd
+        emailConf.email_passwd = email_passwd = new_passwd
 
     with getEmailClient(emailConf) as client:
         inbox_num = client.get_mails_count()
