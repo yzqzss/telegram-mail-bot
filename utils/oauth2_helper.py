@@ -51,6 +51,8 @@ class OAuth2_Base():
             'code': code,
             'redirect_uri': self.redirect_uri,
         }
+        if hasattr(self, 'client_secret'):
+            data['client_secret'] = self.client_secret
 
         response = requests.post(self.token_uri, data=data)
         if response.status_code != 200:
@@ -80,8 +82,9 @@ class OAuth2_Base():
             'grant_type': 'refresh_token',
             'refresh_token': refresh_token,
         }
+        if hasattr(self, 'client_secret'):
+            data['client_secret'] = self.client_secret
 
-        response = requests.post(self.token_uri, data=data)
         response = requests.post(self.token_uri, data=data)
         if response.status_code != 200:
             raise RuntimeError("server returned invalid status %d, body: %s" % (response.status_code, response.text))
@@ -148,6 +151,24 @@ class OAuth2Factory():
 class OAuth2_MS(OAuth2_Base):
     name = 'ms'
     token_uri = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
-    client_id = '9e5f94bc-e8a4-4e73-b8be-63364c29d753'
+    
+    # thunderbolt
+    # client_id = '9e5f94bc-e8a4-4e73-b8be-63364c29d753'
+    # redirect_uri = 'https://localhost'
+    
+    # harry https://harrychen.xyz/2024/09/25/msmtp-outlook-oauth/
+    # client_id = '1ba11cc8-c6d1-4ae6-bd88-6becf878f8df'
+    # client_secret = 'lBm8Q~_IfyNpFUZ6KydTc4QHjLl1IwcCxFhxqa7n'
+    # redirect_uri = 'http://localhost'
+    
+    # misty
+    client_id = '55797b5d-1e14-44bc-a7b3-52575eb1d6ef'
     redirect_uri = 'https://localhost'
+
 OAuth2Factory.register_provider(OAuth2_MS)
+
+class OAuth2_MSOrg(OAuth2_MS):
+    name = 'ms-org'
+    token_uri = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+
+OAuth2Factory.register_provider(OAuth2_MSOrg)

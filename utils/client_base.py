@@ -1,6 +1,8 @@
 import logging
 from typing import Type
 
+from .oauth2_helper import OAuth2Factory
+
 from .mail import Email
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,11 @@ def testMain(EmailClient: Type[EmailClientBase]):
     useraccount = sys.argv[1]
     password = sys.argv[2]
     server_uri = sys.argv[3]
+    
+    new_passwd = OAuth2Factory.code_to_token(password)
+    if new_passwd:
+        print('changed code into token', new_passwd)
+        password = new_passwd
 
     client = EmailClient(useraccount, password, server_uri)
     num = client.get_mails_count()
