@@ -22,7 +22,27 @@ Example:
 /add_email john.doe@gmail.com password imaps://imap.gmail.com:993 smtps://smtp.gmail.com
 ```
 
-You can then reply on received email to send reply with SMTP
+Example for OAuth:
+- MS Personal Account: Login at https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=55797b5d-1e14-44bc-a7b3-52575eb1d6ef&redirect_uri=https%3A%2F%2Flocalhost&scope=https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All+https%3A%2F%2Foutlook.office.com%2FPOP.AccessAsUser.All+https%3A%2F%2Foutlook.office.com%2FSMTP.Send+offline_access
+    - Using authorization code:
+        ```
+        /add_email john.doe@hotmail.com code:ms:M.XXXXXXXX pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+        ```
+    - Using refresh token:
+        ```
+        /add_email john.doe@hotmail.com token:ms:XXXXXXXX pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+        ```
+- MS Organization Account: Login using same URL as above
+    - Using authorization code:
+        ```
+        /add_email john.doe@XXXX.onmicrosoft.com code:ms-org:XXXXXXXX pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+        ```
+    - Using refresh token:
+        ```
+        /add_email john.doe@XXXX.onmicrosoft.com token:ms-org:XXXXXXXX pop3s://outlook.office365.com smtp+starttls://smtp-mail.outlook.com
+        ```
+
+After setup, you can then reply on received email to send reply with SMTP
 
 
 ## Deploy
