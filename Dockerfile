@@ -1,13 +1,15 @@
-FROM docker.io/oz123/pipenv:3.10-v2023-6-26 AS builder
+FROM docker.io/python:3.11 AS builder
 
-# Tell pipenv to create venv in the current directory
-ENV PIPENV_VENV_IN_PROJECT=1
-
-ADD Pipfile.lock Pipfile /workdir/
+# Install pdm
+RUN pip install pdm
 
 WORKDIR /workdir
 
-RUN /usr/local/bin/pipenv sync
+ADD pyproject.toml pdm.lock /workdir/
+
+ENV PDM_NON_INTERACTIVE=1
+
+RUN pdm install --frozen-lockfile --production
 
 ######### Build Stage Finished ##########
 
