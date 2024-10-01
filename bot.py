@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import logging
 import os
@@ -5,18 +6,15 @@ import re
 import socket
 import time
 from traceback import format_exc
-from typing import Type
+from typing import Any, Dict, Type
 import dataclasses
-import typing
-from telegram import Bot, ParseMode, Update
-from telegram.constants import MAX_MESSAGE_LENGTH
-from telegram.ext import (Updater, CommandHandler, MessageHandler, ConversationHandler, Filters, CallbackContext)
+
+from telegram import Update
+from telegram.ext import (Application, CommandHandler, MessageHandler, ContextTypes, filters)
 from pysondb import db as pysondb
 from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
 from utils.oauth2_helper import OAuth2_MS, OAuth2Factory
 from utils.smtpclient import send_email
-
-updater: Updater = None # type: ignore[assignment]
 
 socket.setdefaulttimeout(10) # avoid imaplib timeout
 
@@ -28,29 +26,28 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(lineno)d - 
 logger = logging.getLogger(__name__)
 
 
-getconf = lambda x: os.environ.get(x) # or dotenv_values().get(x)
-bot_token = getconf('TELEGRAM_TOKEN')
-if not bot_token:
+def getconf(x):
+    return os.environ.get(x) # or dotenv_values().get(x)
+
+BOT_TOKEN = getconf('TELEGRAM_TOKEN')
+if not BOT_TOKEN:
     raise Exception('TELEGRAM_TOKEN not set in env or .env file')
 _owner_chat_id = getconf('OWNER_CHAT_ID')
 if not _owner_chat_id:
     raise Exception('OWNER_CHAT_ID not set in env or .env file')
-owner_chat_id = int(_owner_chat_id)
-_poll_interval = getconf('POLL_INTERVAL')
-if not _poll_interval:
-    _poll_interval = '60'
-poll_interval = int(_poll_interval)
-_err_report_interval = getconf('ERR_REPORT_INTERVAL')
-if not _err_report_interval:
-    _err_report_interval = '3600'
-err_report_interval = int(_err_report_interval)
-_request_timeout = getconf('REQUEST_TIMEOUT')
-if not _request_timeout:
-    _request_timeout = '60'
-request_timeout = int(_request_timeout)
+OWNER_CHAT_ID = int(_owner_chat_id)
+POLL_INTERVAL = int(getconf('POLL_INTERVAL') or '60')
+ERR_REPORT_INTERVAL = int(getconf('ERR_REPORT_INTERVAL') or '3600')
+REQUEST_TIMEOUT = int(getconf('REQUEST_TIMEOUT') or '60')
+MAX_MESSAGE_LENGTH = 4096
 
 def is_owner(update: Update) -> bool:
-    return update.message.chat_id == owner_chat_id
+    if update.message:
+        if update.message.chat_id == OWNER_CHAT_ID:
+            return True
+        if update.message.from_user is not None and update.message.from_user.id == OWNER_CHAT_ID:
+            return True
+    return False
 
 def handle_large_text(text):
     while text:
@@ -62,18 +59,11 @@ def handle_large_text(text):
             yield out
             text = text.lstrip(out)
 
-def error(update: Update, context: CallbackContext) -> None:
+def error(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log Errors caused by Updates."""
     logger.warning('Update "%s" caused error "%s"', update, context.error)
 
-def start_callback(update: Update, context: CallbackContext) -> None:
-    if not is_owner(update):
-        return
-    msg = "Use /help to get help"
-    # print(update)
-    update.message.reply_text(msg)
-
-def _help(update: Update, context: CallbackContext) -> None:
+async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_owner(update):
         return
     """Send a message when the command /help is issued."""
@@ -93,9 +83,8 @@ def _help(update: Update, context: CallbackContext) -> None:
 
 Telegram中回复即可直接回复邮件
 """
-    context.bot.send_message(update.message.chat_id, 
-                    # parse_mode=ParseMode.MARKDOWN,
-                    text=help_str)
+    assert update.message
+    await update.message.reply_text(help_str)
 
 @dataclasses.dataclass
 class EmailConf():
@@ -104,12 +93,14 @@ class EmailConf():
     server_uri: str
     smtp_server_uri: str | None
     chat_id: int
+    reply_to_thread_id: int | None
     inbox_num: int
 
-def setting_list_email(update: Update, context: CallbackContext) -> None:
+async def setting_list_email(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_owner(update):
         return
-    
+
+    assert update.message
     msg = 'Email Account List:\n'
     for emailConfDict in emailDB.getAll():
         try:
@@ -117,14 +108,16 @@ def setting_list_email(update: Update, context: CallbackContext) -> None:
         except Exception:
             msg += "    (Invalid Email Account: %s)\n" % emailConfDict
             continue
-        msg += f"    Email: {emailConf.email_addr}, Password: {emailConf.email_passwd}, Server: {emailConf.server_uri}, SMTP Server: {emailConf.smtp_server_uri}, InboxNum: {emailConf.inbox_num}\n"
-    update.message.reply_text(msg)
+        msg += f"    Email: {emailConf.email_addr}, Password: {len(emailConf.email_passwd) * '*'}, Server: {emailConf.server_uri}, SMTP Server: {emailConf.smtp_server_uri}, InboxNum: {emailConf.inbox_num}\n"
+    
+    await update.message.reply_text(msg)
 
-def setting_add_email(update: Update, context: CallbackContext) -> None:
+async def setting_add_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_owner(update):
         return
+    assert update.message
     if not context.args:
-        update.message.reply_text("Invalid command!")
+        await update.message.reply_text("Invalid command!")
         return
     email_addr = context.args[0]
     email_passwd = context.args[1]
@@ -134,18 +127,25 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
         email_smtp = context.args[3]
     
     if not email_server.startswith('imap') and not email_server.startswith('pop3'):
-        update.message.reply_text(f"invalid server: {email_server}")
+        await update.message.reply_text(f"invalid server: {email_server}")
         return
     if email_smtp and not email_smtp.startswith('smtp'):
-        update.message.reply_text(f"invalid smtp server: {email_smtp}")
+        await update.message.reply_text(f"invalid smtp server: {email_smtp}")
         return
     
+    
+    message_thread_id = None
+    """ 是否发送到指定的topic """
+    if update.message.is_topic_message and update.message.message_thread_id:
+        message_thread_id = update.message.message_thread_id
+
     emailConf = EmailConf(
         email_addr=email_addr,
         email_passwd=email_passwd,
         server_uri=email_server,
         smtp_server_uri=email_smtp,
         chat_id=update.message.chat_id,
+        reply_to_thread_id=message_thread_id,
         inbox_num=-1,
     )
     
@@ -153,7 +153,7 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
     
     new_passwd = OAuth2Factory.code_to_token(s=email_passwd)
     if new_passwd:
-        update.message.reply_text(f"Exchanged refresh_token {new_passwd} from {email_passwd} for email {email_addr}, Rewriting password~")
+        await update.message.reply_text(f"Exchanged refresh_token {new_passwd} from {email_passwd} for email {email_addr}, Rewriting password~")
         emailConf.email_passwd = email_passwd = new_passwd
 
     with getEmailClient(emailConf) as client:
@@ -161,43 +161,44 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
     emailConf.inbox_num = inbox_num
     
     if emailDB.getByQuery({'email_addr': email_addr}):
-        update.message.reply_text(f"Email {email_addr} is already configured! Overriding...")
+        await update.message.reply_text(f"Email {email_addr} is already configured! Overriding...")
         emailDB.updateByQuery({'email_addr': email_addr},  dataclasses.asdict(emailConf))
     else:
         emailDB.add(dataclasses.asdict(emailConf))
     
-    update.message.reply_text("Configure email success!")
+    await update.message.reply_text("Configure email success!")
 
 
-def setting_del_email(update: Update, context: CallbackContext) -> None:
+async def setting_del_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_owner(update):
         return
+    assert update.message
     if not context.args:
-        update.message.reply_text("Invalid command!")
+        await update.message.reply_text("Invalid command!")
         return
     email_addr = context.args[0]
     
     emails = emailDB.getByQuery({'email_addr': email_addr})
     if not emails:
-        update.message.reply_text(f'cannot find email account: {email_addr}')
+        await update.message.reply_text(f'cannot find email account: {email_addr}')
         return
     assert len(emails) == 1
     pk = emails[0][emailDB.id_fieldname]
     assert emailDB.deleteById(pk)
-    update.message.reply_text(f'Successfully deleted email account {email_addr}')
+    await update.message.reply_text(f'Successfully deleted email account {email_addr}')
 
-def safeSendText(sender, content):
+async def safeSendText(sender: Any, content: str):
     for text in handle_large_text(content):
-        safeSend(sender, text)
+        await safeSend(sender, text)
 
-def safeSend(sender, content):
+async def safeSend(sender: Any, content: str):
     for i in range(10):
         try:
-            sender(content)
+            await sender(content)
             break
         except Exception:
             logger.warning('cannot send tg msg (retry %d)', i, exc_info=True)
-        time.sleep(i * 5)
+        await asyncio.sleep(i * 5)
 
 def getEmailConf(email_addr):
     emailConfs = emailDB.getByQuery({'email_addr': email_addr})
@@ -245,7 +246,7 @@ PERIODIC_TASK_ERRORS: dict[str, dict[str, list[str]]] = {
     
 }
 PERIODIC_TASK_TICK = 0
-def periodic_task() -> None:
+async def periodic_task(context: ContextTypes.DEFAULT_TYPE) -> None:
     # {
     #     'email_addr': email_addr,
     #     'email_passwd': email_passwd,
@@ -256,8 +257,7 @@ def periodic_task() -> None:
     logger.info("entered periodic task, tick: %d...", PERIODIC_TASK_TICK)
     PERIODIC_TASK_TICK += 1
     
-    # updater.bot.send_message()
-    def handler(emailConfDict, managers=None):
+    async def handler(emailConfDict: Dict, managers=None):
         logger.info("processing periodic task for %s", emailConfDict)
         try:
             if 'id' in emailConfDict:
@@ -267,37 +267,26 @@ def periodic_task() -> None:
         except Exception:
             logger.warning('Cannot parse emailConfDict: %s', emailConfDict, exc_info=True)
             return
-        from multiprocessing import get_context, Process, Manager, Queue
-        ctx = get_context('fork')
-        # def run_with_timeout(fun, *args, **kwargs):
-        #     d = Manager().dict()
-        #     def wrapper():
-        #         d['ret'] = fun(*args, **kwargs)
-        #     p: Process = ctx.Process(target=wrapper, args=args, kwargs=kwargs)
-        #     p.start()
-        #     p.join(request_timeout)
-        #     if p.exitcode != 0:
-        #         raise RuntimeError("Error during executing run_with_timeout, code: %s" % p.exitcode)
-        #     p.kill()
-        #     return d['ret']
-        #     # cannot use Pool because it will pickle lots of things causing error
-        #     # try:
-        #     #     pool = ctx.Pool(1)
-        #     #     fut = pool.apply_async(fun, args=args, kwds=kwargs)
-        #     #     return fut.get(request_timeout)
-        #     # finally:
-        #     #     pool.close()
-        def run_with_timeout(fun, *args, **kwargs):
-            pool = ThreadPool(1)
-            fut = pool.apply_async(fun, args=args, kwds=kwargs)
-            return fut.get(request_timeout)
+
+        def run_with_timeout_sync(fun, *args, **kwargs):
+            fut = ThreadPool().apply_async(fun, args=args, kwds=kwargs)
+            return fut.get(REQUEST_TIMEOUT)
+
+        async def run_with_timeout(fun, *args, **kwargs):
+            if not asyncio.iscoroutinefunction(fun):
+                return run_with_timeout_sync(fun, *args, **kwargs)
+            try:
+                return await asyncio.wait_for(fun(*args, **kwargs), timeout=REQUEST_TIMEOUT)
+            except asyncio.TimeoutError:
+                raise Exception(f"Timeout after {REQUEST_TIMEOUT} seconds")
+
         try:
             client = getEmailClient(emailConf)
-            new_inbox_num = run_with_timeout(lambda: client.get_mails_count())
+            new_inbox_num = await run_with_timeout(client.get_mails_count)
             if new_inbox_num > emailConf.inbox_num:
                 for idx in range(emailConf.inbox_num + 1, new_inbox_num + 1):
                     try:
-                        mail = run_with_timeout(lambda: client.get_mail_by_index(idx))
+                        mail = await run_with_timeout(client.get_mail_by_index, idx)
                     except Exception:
                         logger.warning('cannot retrieve mail %d for %s', idx, emailConf, exc_info=True)
                         break
@@ -305,22 +294,13 @@ def periodic_task() -> None:
                     text = f'''New Email [{emailConf.email_addr}-{idx}]\n'''
                     emailbody, emailfiles = mail.format_email()
                     text += emailbody
-                    
-                    run_with_timeout(lambda: safeSendText(
-                        lambda text: updater.bot.send_message(chat_id=emailConf.chat_id, text=text), # type: ignore[has-type]
-                        text,
-                    ))
+
+                    await run_with_timeout(safeSendText, lambda text: context.bot.send_message(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id,text=text), text)
                     for filename, filemime, file_content in emailfiles:
                         if filemime.startswith('image'):
-                            run_with_timeout(lambda: safeSend(
-                                lambda text: updater.bot.send_document(chat_id=emailConf.chat_id, document=text, filename=filename), # type: ignore[has-type]
-                                text
-                            ))
+                            await run_with_timeout(safeSend, lambda text: context.bot.send_document(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id, document=text, filename=filename), text)
                         else:
-                            run_with_timeout(lambda: safeSend(
-                                lambda text: updater.bot.send_photo(chat_id=emailConf.chat_id, photo=file_content, filename=filename), # type: ignore[has-type]
-                                text
-                            ))
+                            await run_with_timeout(safeSend, lambda text: context.bot.send_photo(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id, photo=file_content, filename=filename), text)
                     emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
         except Exception as e:
             if re.findall(r'\bEOF\b', str(e)):
@@ -335,25 +315,32 @@ def periodic_task() -> None:
                     PERIODIC_TASK_ERRORS[email_addr][exceptionStr] = []
                 PERIODIC_TASK_ERRORS[email_addr][exceptionStr].append(format_exc())
             logger.warning('periodic task error in %s', email_addr, exc_info=True)
+            logger.warning('periodic task error in %s', email_addr, exc_info=True)
+    
+            logger.warning('periodic task error in %s', email_addr, exc_info=True)    
     
     # for emailConfDict in emailDB.getAll():
     #     handler(emailConfDict)
     
     # TODO: Implement timeout control
     from multiprocessing.pool import ThreadPool
-    for _ in ThreadPool(5).imap_unordered(handler, emailDB.getAll()):
-        pass
+    tasks = [handler(emailConfDict) for emailConfDict in emailDB.getAll()]
+    await asyncio.gather(*tasks)
 
 LAST_ERROR_REPORT_TIME: float | None = None
 LAST_ERROR_REPORT_TICK = 0
-def periodic_task_error_report():
+
+async def periodic_task_error_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     global PERIODIC_TASK_ERRORS, LAST_ERROR_REPORT_TIME, LAST_ERROR_REPORT_TICK
     
     last_errors = PERIODIC_TASK_ERRORS
     logger.info("last errors (%s - %s): %s", LAST_ERROR_REPORT_TIME, time.time(), last_errors)
     
     queries = PERIODIC_TASK_TICK - LAST_ERROR_REPORT_TICK
-    time_since_last_report = str(datetime.datetime.now() - LAST_ERROR_REPORT_TIME) if not LAST_ERROR_REPORT_TIME else str(datetime.timedelta(seconds=err_report_interval))
+    if LAST_ERROR_REPORT_TIME is not None:
+        time_since_last_report = str(datetime.datetime.now() - datetime.datetime.fromtimestamp(LAST_ERROR_REPORT_TIME))
+    else:
+        time_since_last_report = str(datetime.timedelta(seconds=ERR_REPORT_INTERVAL))
     
     LAST_ERROR_REPORT_TICK = PERIODIC_TASK_TICK
     LAST_ERROR_REPORT_TIME = time.time()
@@ -365,93 +352,96 @@ def periodic_task_error_report():
     
     text = ''
     for acc, accErrDict in last_errors.items():
-        if sum(c for c in accErrDict.values()) < queries * 0.5:
+        if sum(len(errList) for errList in accErrDict.values()) < queries * 0.5:
             # to avoid spamming, we only print error summary if this account has MASSIVE amount of errors
             text += f'Acc: {acc}\n'
             for errType, errList in accErrDict.items():
                 text += f'    Error: {errType}, triggered {len(errList)} times\n'
     if not text:
         logger.info("No account have massive errors, skipping this report!")
-    text = f'''Error Summary during last {queries} queries in duration {time_since_last_report}:\n''' + text
-    safeSendText(
-        lambda text: updater.bot.send_message(chat_id=owner_chat_id, text=text), # type: ignore[has-type]
-        text
-    )
+    else:
+        text = f'''Error Summary during last {queries} queries in duration {time_since_last_report}:\n''' + text
+        await safeSendText(lambda text: context.bot.send_message(chat_id=OWNER_CHAT_ID, text=text), text)
 
-def handle_reply_send_email(update: Update, context: CallbackContext):
+def is_reply_to_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    assert update.message
+    if update.message.reply_to_message:
+        if update.message.reply_to_message.from_user:
+            if update.message.reply_to_message.from_user.id == context.bot.id:
+                return True
+    return False
+
+async def handle_reply_send_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    assert update.message
+    
+    if not update.message.reply_to_message:
+        return
+    
+    if not is_reply_to_bot(update, context):
+        return
+
     original_message = update.message.reply_to_message.text
+    if not original_message:
+        return
+
     email, mail_id, from_email = re.findall(r'^.*?\[(.*?)-(\d+)\]\n[\S\s]+?From: .*?(\S+)\n', original_message)[0]
     reply_message = update.message.text
+    if not reply_message:
+        return
+
     subject, split, body = reply_message.partition('\n\n')
     if split != '\n\n':
-        update.message.reply_text("Don't know the subject of email. Send the email in this form: \n\n(Your subject here)\n\n(Your body)")
+        await update.message.reply_text("Don't know the subject of email. Send the email in this form: \n\n(Your subject here)\n\n(Your body)")
         return
     emailConf = getEmailConf(email)
-    emailConf.smtp_server_uri
+    if not emailConf.smtp_server_uri:
+        await update.message.reply_text(f"Cannot send email from {email}, no smtp server configured!")
+        return
     send_email(
         smtp_server_uri=emailConf.smtp_server_uri, 
         sender_email=emailConf.email_addr, 
         password=emailConf.email_passwd, 
         receiver_email=from_email, 
         subject=subject, body=body)
-    update.message.reply_text(f"Successfully sent the email from {email} to {from_email} with subject {subject}")
+    await update.message.reply_text(f"Successfully sent the email from {email} to {from_email} with subject {subject}")
 
 def main():
     # Create the EventHandler and pass it your bot's token.
-    global updater
-    updater = Updater(token=bot_token, use_context=True)
-    print(bot_token)
+    assert BOT_TOKEN
 
-    # Get the dispatcher to register handlers
-    dp = updater.dispatcher
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    # simple start function
-    dp.add_handler(CommandHandler("start", start_callback))
-
-    dp.add_handler(CommandHandler("help", _help))
+    app.add_handler(CommandHandler(["help","start"], _help))
     #
     #  Add command handler to set email address and account.
-    dp.add_handler(CommandHandler("list_email", setting_list_email))
-    dp.add_handler(CommandHandler("add_email", setting_add_email))
-    dp.add_handler(CommandHandler("del_email", setting_del_email))
-    dp.add_handler(MessageHandler(Filters.reply, handle_reply_send_email))
-    # TODO: implement send mail
-    # dp.add_handler(ConversationHandler(
-    #     entry_points=[CommandHandler("send_email", handle_start_send_email)],
-    #     states={
-    #         SELECT_SENDER: [MessageHandler(Filters.regex('^[^@]+@[^@]+\.[^@]+$'), handle_send_email_semder)],
-    #         INPUT_RECEIVER: [MessageHandler(Filters.regex('^[^@]+@[^@]+\.[^@]+$'), handle_send_email_receiver)],
-    #         BODY: [MessageHandler(Filters.text, handle_send_email_body)],
-    #     },
-    #     fallbacks=[CommandHandler("cancel", cancel)],
-    # ))
+    app.add_handler(CommandHandler("list_email", setting_list_email))
+    app.add_handler(CommandHandler("add_email", setting_add_email))
+    app.add_handler(CommandHandler("del_email", setting_del_email))
+    app.add_handler(MessageHandler(filters.REPLY, handle_reply_send_email))
 
     
-    def errorHandler(update: Update, context: CallbackContext):
+    async def errorHandler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update or not update.message:
+            return
+
         import traceback
         if context.error:
             excStr = '\n'.join(traceback.format_exception(context.error))
-            update.message.reply_text(f'Error processing command: {excStr}')
+            await update.message.reply_text(f'Error processing command: {excStr}')
         else:
-            update.message.reply_text('Error processing command: (unknown error)')
+            await update.message.reply_text('Error processing command: (unknown error)')
         
-    dp.add_error_handler(errorHandler)
+    app.add_error_handler(errorHandler)
     
-    from apscheduler.schedulers.background import BackgroundScheduler
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(periodic_task, 'interval', seconds=poll_interval, id='email-periodic_task', replace_existing=True)
-    scheduler.add_job(periodic_task_error_report, 'interval', seconds=err_report_interval, id='email-periodic_error_report', replace_existing=True)
-    scheduler.start()
+    assert app.job_queue is not None
+    job_queue = app.job_queue
+    job_queue.run_repeating(periodic_task, interval=POLL_INTERVAL, first=5, name='email-periodic_task')
+    job_queue.run_repeating(periodic_task_error_report, interval=ERR_REPORT_INTERVAL, first=8, name='email-periodic_error_report')
 
-    dp.add_error_handler(error)
+    app.add_error_handler(error)
 
     # Start the Bot
-    updater.start_polling()
-
-    # Run the bot until you press Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT. This should be used most of the time, since
-    # start_polling() is non-blocking and will stop the bot gracefully.
-    updater.idle()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == '__main__':
