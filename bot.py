@@ -93,8 +93,8 @@ class EmailConf():
     server_uri: str
     smtp_server_uri: str | None
     chat_id: int
-    reply_to_thread_id: int | None
     inbox_num: int
+    reply_to_thread_id: int | None = None
 
 async def setting_list_email(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_owner(update):
