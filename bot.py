@@ -269,13 +269,13 @@ async def periodic_task(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.warning('Cannot parse emailConfDict: %s', emailConfDict, exc_info=True)
             return
 
-        def run_with_timeout_sync(fun, *args, **kwargs):
-            fut = ThreadPool().apply_async(fun, args=args, kwds=kwargs)
-            return fut.get(REQUEST_TIMEOUT)
+        async def run_with_timeout_sync(fun, *args, **kwargs):
+            loop = asyncio.get_event_loop()
+            return await asyncio.wait_for(loop.run_in_executor(None, fun, *args, **kwargs), timeout=REQUEST_TIMEOUT)
 
         async def run_with_timeout(fun, *args, **kwargs):
             if not asyncio.iscoroutinefunction(fun):
-                return run_with_timeout_sync(fun, *args, **kwargs)
+                return await run_with_timeout_sync(fun, *args, **kwargs)
             try:
                 return await asyncio.wait_for(fun(*args, **kwargs), timeout=REQUEST_TIMEOUT)
             except asyncio.TimeoutError:
