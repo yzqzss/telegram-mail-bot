@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+pytz = "*"
+tzlocal = "<3.0" # fix Python APScheduler fails: 'Only timezones from the pytz library are supported' error
+python-telegram-bot = "<20.0"
+pyzmail36 = "*"
+APScheduler = "*"
+pysondb = "*"
+python-dotenv = "*"
+pysocks = "*"
+markdownify = "*"
+requests = "*"
+
+[dev-packages]
+pylint = "*"
+
+[requires]
+python_version = "3.11"
