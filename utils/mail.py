@@ -58,7 +58,7 @@ class Email(object):
             mainbody += f'\n\nAdditional Parts:\n'
             for part in self.additional_parts:
                 part: MailPart
-                part_name = part.get_filename()
+                part_name = part.filename
                 part_content = part.get_payload()
                 mainbody += f'- {part_name} ({part.type}, size {len(part_content)})'
                 retfiles.append((part_name, part.type, part_content))
