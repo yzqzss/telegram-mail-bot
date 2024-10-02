@@ -13,6 +13,7 @@ from telegram import Update
 from telegram.ext import (Application, CommandHandler, MessageHandler, ContextTypes, filters)
 from pysondb import db as pysondb
 from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
+from utils.mail import Email
 from utils.oauth2_helper import OAuth2_MS, OAuth2Factory
 from utils.smtpclient import send_email
 
@@ -286,7 +287,7 @@ async def periodic_task(context: ContextTypes.DEFAULT_TYPE) -> None:
             if new_inbox_num > emailConf.inbox_num:
                 for idx in range(emailConf.inbox_num + 1, new_inbox_num + 1):
                     try:
-                        mail = await run_with_timeout(client.get_mail_by_index, idx)
+                        mail: Email = await run_with_timeout(client.get_mail_by_index, idx)
                     except Exception:
                         logger.warning('cannot retrieve mail %d for %s', idx, emailConf, exc_info=True)
                         break
@@ -297,10 +298,10 @@ async def periodic_task(context: ContextTypes.DEFAULT_TYPE) -> None:
 
                     await run_with_timeout(safeSendText, lambda text: context.bot.send_message(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id,text=text), text)
                     for filename, filemime, file_content in emailfiles:
-                        if filemime.startswith('image'):
-                            await run_with_timeout(safeSend, lambda text: context.bot.send_document(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id, document=text, filename=filename), text)
-                        else:
+                        if filemime and filemime.startswith('image'):
                             await run_with_timeout(safeSend, lambda text: context.bot.send_photo(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id, photo=file_content, filename=filename), text)
+                        else:
+                            await run_with_timeout(safeSend, lambda text: context.bot.send_document(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id, document=file_content, filename=filename), text)
                     emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
         except Exception as e:
             if re.findall(r'\bEOF\b', str(e)):
