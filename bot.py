@@ -13,6 +13,7 @@ from telegram.constants import MAX_MESSAGE_LENGTH
 from telegram.ext import (Updater, CommandHandler, MessageHandler, ConversationHandler, Filters, CallbackContext)
 from pysondb import db as pysondb
 from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
+from utils.migration import conf_migrate
 from utils.oauth2_helper import OAuth2_MS, OAuth2Factory
 from utils.smtpclient import send_email
 
@@ -20,6 +21,7 @@ updater: Updater = None # type: ignore[assignment]
 
 socket.setdefaulttimeout(10) # avoid imaplib timeout
 
+conf_migrate()
 emailDB = pysondb.getDb("conf/email_accounts.json")
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(lineno)d - %(message)s',
@@ -91,9 +93,8 @@ class EmailConf():
     email_passwd: str
     server_uri: str
     smtp_server_uri: str | None
-    chat_id: int
+    chat_id: str
     inbox_num: int
-    reply_to_thread_id: int | None = None
 
 def setting_list_email(update: Update, context: CallbackContext) -> None:
     if not is_owner(update):
@@ -129,7 +130,7 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
         update.message.reply_text(f"invalid smtp server: {email_smtp}")
         return
     
-    message_thread_id = None
+    message_thread_id = ""
     if update.message.is_topic_message and update.message.message_thread_id:
         message_thread_id = update.message.message_thread_id
     
@@ -138,9 +139,8 @@ def setting_add_email(update: Update, context: CallbackContext) -> None:
         email_passwd=email_passwd,
         server_uri=email_server,
         smtp_server_uri=email_smtp,
-        chat_id=update.message.chat_id,
+        chat_id=f"{update.message.chat_id},{message_thread_id}",
         inbox_num=-1,
-        reply_to_thread_id=message_thread_id,
     )
     
     logger.info("received setting_email command.")
@@ -287,6 +287,7 @@ def periodic_task() -> None:
             return fut.get(REQUEST_TIMEOUT)
         try:
             client = getEmailClient(emailConf)
+            chat_id, reply_to_message_id = emailConf.chat_id.split(',') if ',' in emailConf.chat_id else (emailConf.chat_id, None)
             new_inbox_num = run_with_timeout(lambda: client.get_mails_count())
             if new_inbox_num > emailConf.inbox_num:
                 for idx in range(emailConf.inbox_num + 1, new_inbox_num + 1):
@@ -301,18 +302,18 @@ def periodic_task() -> None:
                     text += emailbody
                     
                     run_with_timeout(lambda: safeSendText(
-                        lambda text: updater.bot.send_message(chat_id=emailConf.chat_id,reply_to_message_id=emailConf.reply_to_thread_id, text=text), # type: ignore[has-type]
+                        lambda text: updater.bot.send_message(chat_id=chat_id,reply_to_message_id=reply_to_message_id, text=text), # type: ignore[has-type]
                         text,
                     ))
                     for filename, filemime, file_content in emailfiles:
                         if filemime.startswith('image'):
                             run_with_timeout(lambda: safeSend(
-                                lambda text: updater.bot.send_photo(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id, photo=file_content, filename=filename), # type: ignore[has-type]
+                                lambda text: updater.bot.send_photo(chat_id=chat_id, reply_to_message_id=reply_to_message_id, photo=file_content, filename=filename), # type: ignore[has-type]
                                 text
                             ))
                         else:
                             run_with_timeout(lambda: safeSend(
-                                lambda text: updater.bot.send_document(chat_id=emailConf.chat_id, reply_to_message_id=emailConf.reply_to_thread_id, document=file_content, filename=filename), # type: ignore[has-type]
+                                lambda text: updater.bot.send_document(chat_id=chat_id, reply_to_message_id=reply_to_message_id, document=file_content, filename=filename), # type: ignore[has-type]
                                 text
                             ))
                     emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': idx})
