@@ -289,7 +289,9 @@ def periodic_task() -> None:
             client = getEmailClient(emailConf)
             chat_id, reply_to_message_id = emailConf.chat_id.split(',') if ',' in emailConf.chat_id else (emailConf.chat_id, None)
             new_inbox_num = run_with_timeout(lambda: client.get_mails_count())
-            if new_inbox_num > emailConf.inbox_num:
+            if new_inbox_num < emailConf.inbox_num:
+                emailDB.updateByQuery({'email_addr': email_addr}, {'inbox_num': new_inbox_num})
+            elif new_inbox_num > emailConf.inbox_num:
                 for idx in range(emailConf.inbox_num + 1, new_inbox_num + 1):
                     try:
                         mail = run_with_timeout(lambda: client.get_mail_by_index(idx))
