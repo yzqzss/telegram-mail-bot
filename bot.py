@@ -16,6 +16,7 @@ from utils import EmailClientBase, EmailClientIMAP, EmailClientPOP3
 from utils.migration import conf_migrate
 from utils.oauth2_helper import OAuth2_MS, OAuth2Factory
 from utils.smtpclient import send_email
+from utils.conf import Conf
 
 updater: Updater = None # type: ignore[assignment]
 
@@ -30,24 +31,11 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(lineno)d - 
 logger = logging.getLogger(__name__)
 
 
-def getconf(x):
-    return os.environ.get(x) # or dotenv_values().get(x)
-BOT_TOKEN = getconf('TELEGRAM_TOKEN')
-if not BOT_TOKEN:
-    raise Exception('TELEGRAM_TOKEN not set in env or .env file')
-_owner_chat_id = getconf('OWNER_CHAT_ID')
-if not _owner_chat_id:
-    raise Exception('OWNER_CHAT_ID not set in env or .env file')
-OWNER_CHAT_ID = int(_owner_chat_id)
-POLL_INTERVAL = int(getconf('POLL_INTERVAL') or '60')
-ERR_REPORT_INTERVAL = int(getconf('ERR_REPORT_INTERVAL') or '3600')
-REQUEST_TIMEOUT = int(getconf('REQUEST_TIMEOUT') or '60')
-
 def is_owner(update: Update) -> bool:
     if update.message:
-        if update.message.chat_id == OWNER_CHAT_ID:
+        if update.message.chat_id == Conf.OWNER_CHAT_ID:
             return True
-        if update.message.from_user is not None and update.message.from_user.id == OWNER_CHAT_ID:
+        if update.message.from_user is not None and update.message.from_user.id == Conf.OWNER_CHAT_ID:
             return True
     return False
 
@@ -284,7 +272,7 @@ def periodic_task() -> None:
         def run_with_timeout(fun, *args, **kwargs):
             pool = ThreadPool(1)
             fut = pool.apply_async(fun, args=args, kwds=kwargs)
-            return fut.get(REQUEST_TIMEOUT)
+            return fut.get(Conf.REQUEST_TIMEOUT)
         try:
             client = getEmailClient(emailConf)
             chat_id, reply_to_message_id = emailConf.chat_id.split(',') if ',' in emailConf.chat_id else (emailConf.chat_id, None)
@@ -352,9 +340,9 @@ def periodic_task_error_report():
     queries = PERIODIC_TASK_TICK - LAST_ERROR_REPORT_TICK
 
     if LAST_ERROR_REPORT_TIME is not None:
-        time_since_last_report = str(datetime.datetime.now() - datetime.datetime.fromtimestamp(LAST_ERROR_REPORT_TIME))
+        time_since_last_report = str(datetime.datetime.now() - datetime.datetime.fromtimestamp(Conf.LAST_ERROR_REPORT_TIME))
     else:
-        time_since_last_report = str(datetime.timedelta(seconds=ERR_REPORT_INTERVAL))    
+        time_since_last_report = str(datetime.timedelta(seconds=Conf.ERR_REPORT_INTERVAL))    
 
     LAST_ERROR_REPORT_TICK = PERIODIC_TASK_TICK
     LAST_ERROR_REPORT_TIME = time.time()
@@ -375,7 +363,7 @@ def periodic_task_error_report():
         logger.info("No account have massive errors, skipping this report!")
     text = f'''Error Summary during last {queries} queries in duration {time_since_last_report}:\n''' + text
     safeSendText(
-        lambda text: updater.bot.send_message(chat_id=OWNER_CHAT_ID, text=text), # type: ignore[has-type]
+        lambda text: updater.bot.send_message(chat_id=Conf.OWNER_CHAT_ID, text=text), # type: ignore[has-type]
         text
     )
 
@@ -418,8 +406,8 @@ def handle_reply_send_email(update: Update, context: CallbackContext):
 def main():
     # Create the EventHandler and pass it your bot's token.
     global updater
-    updater = Updater(token=BOT_TOKEN, use_context=True) # type: ignore
-    print(BOT_TOKEN)
+    updater = Updater(token=Conf.TELEGRAM_TOKEN, use_context=True)
+    print(Conf.TELEGRAM_TOKEN)
 
     # Get the dispatcher to register handlers
     dp = updater.dispatcher
@@ -460,8 +448,8 @@ def main():
     
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler()
-    scheduler.add_job(periodic_task, 'interval', seconds=POLL_INTERVAL, id='email-periodic_task', replace_existing=True)
-    scheduler.add_job(periodic_task_error_report, 'interval', seconds=ERR_REPORT_INTERVAL, id='email-periodic_error_report', replace_existing=True)
+    scheduler.add_job(periodic_task, 'interval', seconds=Conf.POLL_INTERVAL, id='email-periodic_task', replace_existing=True)
+    scheduler.add_job(periodic_task_error_report, 'interval', seconds=Conf.ERR_REPORT_INTERVAL, id='email-periodic_error_report', replace_existing=True)
     scheduler.start()
 
     dp.add_error_handler(error)
